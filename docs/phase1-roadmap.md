@@ -18,9 +18,12 @@ and conflicts on stale writes; callers reload and revalidate before retrying.
 
 ## Follow-up work
 
-1. **Reliable delivery worker.** Define outbox claiming, retry/backoff, per-order
-   ordering, recovery, retention and idempotent consumption. Pending durable
-   records exist; external event delivery does not. Add Kafka only alongside
+1. **Delivery activation and operations.** Leased claims, retry/backoff, fenced
+   completion and crash recovery are implemented as an explicit dispatch
+   component; see [ADR 0004](adr/0004-outbox-dispatch.md). A real timeout-tested
+   publisher, scheduling, consumer deduplication/sequence handling, retention,
+   observability and recovery controls remain follow-up work. There is no
+   default publisher or external delivery guarantee. Add Kafka only alongside
    explicit failure semantics and tests.
 2. **Risk/execution adapters.** Add concrete risk decisions before acceptance
    and deterministic simulation through the internal execution boundary.
