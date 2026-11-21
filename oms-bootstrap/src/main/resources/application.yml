@@ -1,0 +1,34 @@
+spring:
+  application:
+    name: trading-oms
+  datasource:
+    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/oms}
+    username: ${OMS_DB_USER:oms}
+    password: ${OMS_DB_PASSWORD:oms}
+    hikari:
+      maximum-pool-size: 10
+      connection-timeout: 5000
+  flyway:
+    enabled: true
+  jackson:
+    deserialization:
+      fail-on-unknown-properties: true
+      accept-float-as-int: false
+  mvc:
+    problemdetails:
+      enabled: true
+server:
+  shutdown: graceful
+  tomcat:
+    max-http-form-post-size: 16KB
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      show-details: never
+springdoc:
+  swagger-ui:
+    path: /swagger-ui.html
