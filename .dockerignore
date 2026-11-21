@@ -1,0 +1,6 @@
+**
+!Dockerfile
+!.dockerignore
+!oms-bootstrap/
+!oms-bootstrap/target/
+!oms-bootstrap/target/oms-bootstrap-0.1.0-SNAPSHOT.jar

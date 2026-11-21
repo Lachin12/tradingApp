@@ -2,6 +2,12 @@
 
 Status: Accepted for the first increment.
 
+Historical scope: this ADR records the original domain/scaffold increment.
+Its lifecycle and module decisions still apply. The application, PostgreSQL,
+concurrency and outbox work described below as future work is implemented
+by the later [ADR 0003](0003-transaction-safety.md); see the current
+[verification record](../verification.md) for executed results.
+
 ## Context
 
 The simulated OMS needs strict lifecycle and transaction invariants while
