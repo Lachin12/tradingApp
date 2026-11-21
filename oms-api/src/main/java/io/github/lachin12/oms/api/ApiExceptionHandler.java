@@ -1,6 +1,7 @@
 package io.github.lachin12.oms.api;
 
 import io.github.lachin12.oms.application.ConcurrentOrderUpdateException;
+import io.github.lachin12.oms.application.ExecutionConflictException;
 import io.github.lachin12.oms.application.IdempotencyConflictException;
 import io.github.lachin12.oms.application.InvalidOrderRequestException;
 import io.github.lachin12.oms.application.NotFoundException;
@@ -35,6 +36,11 @@ public class ApiExceptionHandler extends ResponseEntityExceptionHandler {
     @ExceptionHandler(ConcurrentOrderUpdateException.class)
     ResponseEntity<Object> concurrentUpdate(ConcurrentOrderUpdateException ex) {
         return response(HttpStatus.CONFLICT, "concurrent-update", ex.getMessage());
+    }
+
+    @ExceptionHandler(ExecutionConflictException.class)
+    ResponseEntity<Object> executionConflict(ExecutionConflictException ex) {
+        return response(HttpStatus.CONFLICT, "execution-conflict", ex.getMessage());
     }
 
     @ExceptionHandler(InvalidOrderRequestException.class)
