@@ -2,7 +2,9 @@ package io.github.lachin12.oms.api;
 
 import io.github.lachin12.oms.application.ConcurrentOrderUpdateException;
 import io.github.lachin12.oms.application.IdempotencyConflictException;
+import io.github.lachin12.oms.application.InvalidOrderRequestException;
 import io.github.lachin12.oms.application.NotFoundException;
+import io.github.lachin12.oms.application.OrderConflictException;
 import java.net.URI;
 import org.springframework.core.Ordered;
 import org.springframework.core.annotation.Order;
@@ -35,13 +37,13 @@ public class ApiExceptionHandler extends ResponseEntityExceptionHandler {
         return response(HttpStatus.CONFLICT, "concurrent-update", ex.getMessage());
     }
 
-    @ExceptionHandler(IllegalArgumentException.class)
-    ResponseEntity<Object> invalidArgument(IllegalArgumentException ex) {
+    @ExceptionHandler(InvalidOrderRequestException.class)
+    ResponseEntity<Object> invalidArgument(InvalidOrderRequestException ex) {
         return response(HttpStatus.BAD_REQUEST, "invalid-request", ex.getMessage());
     }
 
-    @ExceptionHandler(IllegalStateException.class)
-    ResponseEntity<Object> illegalState(IllegalStateException ex) {
+    @ExceptionHandler(OrderConflictException.class)
+    ResponseEntity<Object> illegalState(OrderConflictException ex) {
         return response(HttpStatus.CONFLICT, "illegal-state", ex.getMessage());
     }
 

@@ -38,15 +38,15 @@ class SubmitOrderTest {
 
     @Test
     void canonicalInputRejectsInvalidTermsBeforeIdempotencyClaim() {
-        assertThrows(IllegalArgumentException.class, () -> request(Side.BUY, OrderType.LIMIT, "0", "100"));
-        assertThrows(IllegalArgumentException.class, () -> request(Side.BUY, OrderType.LIMIT, "10", null));
-        assertThrows(IllegalArgumentException.class, () -> request(Side.BUY, OrderType.MARKET, "10", "100"));
-        assertThrows(IllegalArgumentException.class, () -> request(Side.BUY, OrderType.LIMIT, "0.000000001", "100"));
-        assertThrows(IllegalArgumentException.class, () -> request(null, OrderType.LIMIT, "10", "100"));
-        assertThrows(IllegalArgumentException.class, () -> request(Side.BUY, null, "10", "100"));
-        assertThrows(IllegalArgumentException.class, () -> new SubmitOrder(null, INSTRUMENT_ID,
+        assertThrows(InvalidOrderRequestException.class, () -> request(Side.BUY, OrderType.LIMIT, "0", "100"));
+        assertThrows(InvalidOrderRequestException.class, () -> request(Side.BUY, OrderType.LIMIT, "10", null));
+        assertThrows(InvalidOrderRequestException.class, () -> request(Side.BUY, OrderType.MARKET, "10", "100"));
+        assertThrows(InvalidOrderRequestException.class, () -> request(Side.BUY, OrderType.LIMIT, "0.000000001", "100"));
+        assertThrows(InvalidOrderRequestException.class, () -> request(null, OrderType.LIMIT, "10", "100"));
+        assertThrows(InvalidOrderRequestException.class, () -> request(Side.BUY, null, "10", "100"));
+        assertThrows(InvalidOrderRequestException.class, () -> new SubmitOrder(null, INSTRUMENT_ID,
                 Side.BUY, OrderType.MARKET, BigDecimal.ONE, null));
-        assertThrows(IllegalArgumentException.class, () -> new SubmitOrder(ACCOUNT_ID, null,
+        assertThrows(InvalidOrderRequestException.class, () -> new SubmitOrder(ACCOUNT_ID, null,
                 Side.BUY, OrderType.MARKET, BigDecimal.ONE, null));
     }
 

@@ -24,11 +24,13 @@ import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Supplier;
+import java.util.stream.Stream;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.NullAndEmptySource;
+import org.junit.jupiter.params.provider.MethodSource;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -162,7 +164,7 @@ class OmsServiceTest {
     @NullAndEmptySource
     @ValueSource(strings = {" ", "two words", "\t", "\n", "é", "key\u007f"})
     void invalidKeysFailBeforeOpeningTransaction(String key) {
-        assertThrows(IllegalArgumentException.class, () -> service.submit(marketRequest(), key));
+        assertThrows(InvalidOrderRequestException.class, () -> service.submit(marketRequest(), key));
         verifyNoInteractions(submissions, references, orders);
         assertEquals(0, transactions.executions);
         assertEquals(0, generatedIds.get());
@@ -170,7 +172,7 @@ class OmsServiceTest {
 
     @Test
     void overlongKeyFailsBeforeOpeningTransaction() {
-        assertThrows(IllegalArgumentException.class, () -> service.submit(marketRequest(), "x".repeat(129)));
+        assertThrows(InvalidOrderRequestException.class, () -> service.submit(marketRequest(), "x".repeat(129)));
         assertEquals(0, transactions.executions);
     }
 
@@ -203,7 +205,7 @@ class OmsServiceTest {
         when(references.findAccount(ACCOUNT_ID)).thenReturn(Optional.of(ACCOUNT));
         when(references.findInstrument(INSTRUMENT_ID)).thenReturn(Optional.of(INSTRUMENT));
 
-        assertThrows(IllegalArgumentException.class, () -> service.submit(offStep, "key"));
+        assertThrows(InvalidOrderRequestException.class, () -> service.submit(offStep, "key"));
         verifyNoInteractions(orders);
         assertFalse(transactions.active);
     }
@@ -305,17 +307,138 @@ class OmsServiceTest {
 
     @Test
     void rejectsInvalidPaginationAndExpectedVersionBeforeDatabaseAccess() {
-        assertThrows(IllegalArgumentException.class, () -> service.list(ACCOUNT_ID, 0, 0));
-        assertThrows(IllegalArgumentException.class, () -> service.list(ACCOUNT_ID, 101, 0));
-        assertThrows(IllegalArgumentException.class, () -> service.list(ACCOUNT_ID, 1, -1));
-        assertThrows(IllegalArgumentException.class, () -> service.list(ACCOUNT_ID, 1, 10001));
-        assertThrows(IllegalArgumentException.class, () -> service.cancel(ORDER_ID, -1, "User request"));
-        assertThrows(IllegalArgumentException.class, () -> service.recordExecution(ORDER_ID, -1,
+        assertThrows(InvalidOrderRequestException.class, () -> service.list(ACCOUNT_ID, 0, 0));
+        assertThrows(InvalidOrderRequestException.class, () -> service.list(ACCOUNT_ID, 101, 0));
+        assertThrows(InvalidOrderRequestException.class, () -> service.list(ACCOUNT_ID, 1, -1));
+        assertThrows(InvalidOrderRequestException.class, () -> service.list(ACCOUNT_ID, 1, 10001));
+        assertThrows(InvalidOrderRequestException.class, () -> service.cancel(ORDER_ID, -1, "User request"));
+        assertThrows(InvalidOrderRequestException.class, () -> service.recordExecution(ORDER_ID, -1,
                 new Execution(EXECUTION_ID, decimal("1"), decimal("100"), CANONICAL_NOW)));
-        assertThrows(IllegalArgumentException.class, () -> service.get(null));
-        assertThrows(IllegalArgumentException.class, () -> service.list(null, 1, 0));
+        assertThrows(InvalidOrderRequestException.class, () -> service.get(null));
+        assertThrows(InvalidOrderRequestException.class, () -> service.list(null, 1, 0));
         verifyNoInteractions(orders);
         assertEquals(0, transactions.executions);
+    }
+
+    @Test
+    void missingRequestAndExecutionAreTypedValidationFailures() {
+        assertThrows(InvalidOrderRequestException.class, () -> service.submit(null, "key"));
+        assertThrows(InvalidOrderRequestException.class, () -> service.recordExecution(ORDER_ID, 0, null));
+        verifyNoInteractions(submissions, references, orders);
+        assertEquals(0, transactions.executions);
+    }
+
+    @Test
+    void invalidCancellationReasonIsTypedValidationFailure() {
+        when(orders.find(ORDER_ID)).thenReturn(Optional.of(new StoredOrder(acceptedOrder(), 0)));
+
+        InvalidOrderRequestException failure = assertThrows(InvalidOrderRequestException.class,
+                () -> service.cancel(ORDER_ID, 0, " "));
+
+        assertInstanceOf(IllegalArgumentException.class, failure.getCause());
+        verify(orders, never()).update(any(), anyLong());
+    }
+
+    @Test
+    void cancellationOfTerminalOrderIsTypedBusinessConflict() {
+        Order cancelled = acceptedOrder().cancel("User request", CANONICAL_NOW);
+        when(orders.find(ORDER_ID)).thenReturn(Optional.of(new StoredOrder(cancelled, 1)));
+
+        OrderConflictException failure = assertThrows(OrderConflictException.class,
+                () -> service.cancel(ORDER_ID, 1, "Second request"));
+
+        assertInstanceOf(IllegalStateException.class, failure.getCause());
+        verify(orders, never()).update(any(), anyLong());
+    }
+
+    @Test
+    void fillOfCancelledOrderIsTypedBusinessConflict() {
+        Order cancelled = acceptedOrder().cancel("User request", CANONICAL_NOW);
+        when(orders.find(ORDER_ID)).thenReturn(Optional.of(new StoredOrder(cancelled, 1)));
+        Execution report = new Execution(EXECUTION_ID, decimal("1"), decimal("100"), CANONICAL_NOW);
+
+        assertThrows(OrderConflictException.class, () -> service.recordExecution(ORDER_ID, 1, report));
+        verify(orders, never()).update(any(), anyLong());
+    }
+
+    @ParameterizedTest
+    @MethodSource("internalFailures")
+    void submissionStoreFailuresAreNotConvertedToBusinessErrors(RuntimeException failure) {
+        when(submissions.claim(ACCOUNT_ID, "key", RequestFingerprint.of(marketRequest()), ORDER_ID))
+                .thenThrow(failure);
+
+        assertSame(failure, assertThrows(RuntimeException.class, () -> service.submit(marketRequest(), "key")));
+        verifyNoInteractions(references, orders);
+    }
+
+    @ParameterizedTest
+    @MethodSource("internalFailures")
+    void referenceDataFailuresAreNotConvertedToBusinessErrors(RuntimeException failure) {
+        claimOwner(marketRequest());
+        when(references.findAccount(ACCOUNT_ID)).thenThrow(failure);
+
+        assertSame(failure, assertThrows(RuntimeException.class, () -> service.submit(marketRequest(), "key")));
+        verifyNoInteractions(orders);
+    }
+
+    @ParameterizedTest
+    @MethodSource("internalFailures")
+    void orderReadFailuresAreNotConvertedToBusinessErrors(RuntimeException failure) {
+        when(orders.find(ORDER_ID)).thenThrow(failure);
+
+        assertSame(failure, assertThrows(RuntimeException.class, () -> service.get(ORDER_ID)));
+    }
+
+    @ParameterizedTest
+    @MethodSource("internalFailures")
+    void orderInsertFailuresAreNotConvertedToBusinessErrors(RuntimeException failure) {
+        claimOwner(marketRequest());
+        when(references.findAccount(ACCOUNT_ID)).thenReturn(Optional.of(ACCOUNT));
+        when(references.findInstrument(INSTRUMENT_ID)).thenReturn(Optional.of(INSTRUMENT));
+        when(orders.insert(any())).thenThrow(failure);
+
+        assertSame(failure, assertThrows(RuntimeException.class, () -> service.submit(marketRequest(), "key")));
+    }
+
+    @ParameterizedTest
+    @MethodSource("internalFailures")
+    void orderUpdateFailuresAreNotConvertedToBusinessErrors(RuntimeException failure) {
+        when(orders.find(ORDER_ID)).thenReturn(Optional.of(new StoredOrder(acceptedOrder(), 0)));
+        when(orders.update(any(), eq(0L))).thenThrow(failure);
+
+        assertSame(failure, assertThrows(RuntimeException.class, () -> service.cancel(ORDER_ID, 0, "User request")));
+    }
+
+    @ParameterizedTest
+    @MethodSource("internalFailures")
+    void transactionFailuresAreNotConvertedToBusinessErrors(RuntimeException failure) {
+        UnitOfWork failingTransactions = new UnitOfWork() {
+            @Override public <T> T execute(Supplier<T> work) { throw failure; }
+        };
+        OmsService failingService = new OmsService(references, orders, submissions, failingTransactions,
+                clock, () -> ORDER_ID);
+
+        assertSame(failure, assertThrows(RuntimeException.class, () -> failingService.submit(marketRequest(), "key")));
+        verifyNoInteractions(submissions, references, orders);
+    }
+
+    @Test
+    void clockFailureIsNotConvertedToBusinessConflict() {
+        Clock failingClock = mock(Clock.class);
+        IllegalStateException internal = new IllegalStateException("Internal clock configuration");
+        when(failingClock.instant()).thenThrow(internal);
+        when(orders.find(ORDER_ID)).thenReturn(Optional.of(new StoredOrder(acceptedOrder(), 0)));
+        OmsService failingService = new OmsService(references, orders, submissions, transactions,
+                failingClock, () -> ORDER_ID);
+
+        assertSame(internal, assertThrows(IllegalStateException.class,
+                () -> failingService.cancel(ORDER_ID, 0, "User request")));
+        verify(orders, never()).update(any(), anyLong());
+    }
+
+    static Stream<RuntimeException> internalFailures() {
+        return Stream.of(new IllegalArgumentException("Internal database argument"),
+                new IllegalStateException("Internal database state"));
     }
 
     private void claimOwner(SubmitOrder request) {

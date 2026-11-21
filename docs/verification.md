@@ -9,16 +9,17 @@ uses Temurin JRE 21.0.13.1. This records executed checks, not intended checks.
 
 `./mvnw -B -ntp clean verify` completed successfully for all six reactor
 projects and packaged the executable application JAR. Surefire and Failsafe XML
-reports contained **226 tests, zero failures, zero errors and zero skipped**:
+reports contained **248 tests, zero failures, zero errors and zero skipped**
+after the final release review:
 
 | Suite | Executed tests |
 | --- | ---: |
 | Domain unit tests | 139 |
-| Application unit tests | 29 |
-| API unit/HTTP contract tests | 33 |
+| Application unit tests | 46 |
+| API unit/HTTP contract tests | 38 |
 | PostgreSQL integration tests (`JdbcOmsStoreIT`) | 22 |
 | Full HTTP/application/PostgreSQL integration tests (`OmsHttpIT`) | 3 |
-| **Total** | **226** |
+| **Total** | **248** |
 
 The domain suite includes 15 aggregate-rehydration cases in addition to the
 original lifecycle/decimal coverage. Application tests cover canonical request
@@ -48,6 +49,14 @@ Early attempts exposed two new test-fixture errors and a compile-time ambiguous
 integration-test import. Those were repaired before the successful complete
 run. Initial failures are not counted as passing evidence, and no tests were
 skipped to obtain the results above.
+
+Final review found that broad argument/state exception handlers could classify
+internal persistence failures as client errors and expose their messages. The
+application now translates only known command-validation and lifecycle failures
+into explicit public error types. Unexpected adapter, transaction and clock
+failures propagate to sanitized HTTP 500 responses. Regression tests cover both
+typed business errors and internal argument/state failures during retrieval and
+listing. The complete clean build above was rerun after this fix.
 
 ## Packaged application and Docker Compose
 

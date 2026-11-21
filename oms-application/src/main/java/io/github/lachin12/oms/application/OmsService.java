@@ -29,7 +29,7 @@ public final class OmsService {
     }
 
     public SubmissionResult submit(SubmitOrder request, String key) {
-        Objects.requireNonNull(request, "request");
+        if (request == null) throw new InvalidOrderRequestException("Request is required");
         validateKey(key);
         String fingerprint = RequestFingerprint.of(request);
         return transactions.execute(() -> {
@@ -41,8 +41,8 @@ public final class OmsService {
             Instrument instrument = references.findInstrument(request.instrumentId())
                     .orElseThrow(() -> new NotFoundException("Instrument not found"));
             Instant at = now();
-            Order accepted = Order.submit(claim.orderId(), account, instrument, request.side(), request.type(),
-                    request.quantity(), request.limitPrice(), at).accept(at);
+            Order accepted = domainCommand(() -> Order.submit(claim.orderId(), account, instrument, request.side(),
+                    request.type(), request.quantity(), request.limitPrice(), at).accept(at));
             return new SubmissionResult(orders.insert(accepted), false);
         });
     }
@@ -55,7 +55,7 @@ public final class OmsService {
     public List<StoredOrder> list(UUID accountId, int limit, int offset) {
         requireId(accountId);
         if (limit < 1 || limit > 100 || offset < 0 || offset > 10000) {
-            throw new IllegalArgumentException("Limit must be 1..100 and offset 0..10000");
+            throw new InvalidOrderRequestException("Limit must be 1..100 and offset 0..10000");
         }
         return transactions.execute(() -> List.copyOf(orders.list(accountId, limit, offset)));
     }
@@ -65,7 +65,8 @@ public final class OmsService {
         requireVersion(expectedVersion);
         return transactions.execute(() -> {
             StoredOrder stored = requireVersion(requireOrder(orderId), expectedVersion);
-            Order cancelled = stored.order().cancel(reason, atLeastLastEvent(stored.order()));
+            Instant at = atLeastLastEvent(stored.order());
+            Order cancelled = domainCommand(() -> stored.order().cancel(reason, at));
             return orders.update(cancelled, expectedVersion);
         });
     }
@@ -74,12 +75,13 @@ public final class OmsService {
     public StoredOrder recordExecution(UUID orderId, long expectedVersion, Execution execution) {
         requireId(orderId);
         requireVersion(expectedVersion);
-        if (execution == null) throw new IllegalArgumentException("Execution is required");
-        Execution normalized = new Execution(execution.id(), execution.quantity(), execution.price(),
-                execution.executedAt().truncatedTo(ChronoUnit.MICROS));
+        if (execution == null) throw new InvalidOrderRequestException("Execution is required");
+        Execution normalized = domainCommand(() -> new Execution(execution.id(), execution.quantity(), execution.price(),
+                execution.executedAt().truncatedTo(ChronoUnit.MICROS)));
         return transactions.execute(() -> {
             StoredOrder stored = requireVersion(requireOrder(orderId), expectedVersion);
-            Order filled = stored.order().fill(normalized, atLeastLastEvent(stored.order()));
+            Instant at = atLeastLastEvent(stored.order());
+            Order filled = domainCommand(() -> stored.order().fill(normalized, at));
             return orders.update(filled, expectedVersion);
         });
     }
@@ -105,17 +107,28 @@ public final class OmsService {
     }
 
     private static void requireId(UUID id) {
-        if (id == null) throw new IllegalArgumentException("ID is required");
+        if (id == null) throw new InvalidOrderRequestException("ID is required");
     }
 
     private static void requireVersion(long version) {
-        if (version < 0) throw new IllegalArgumentException("Expected version cannot be negative");
+        if (version < 0) throw new InvalidOrderRequestException("Expected version cannot be negative");
     }
 
     private static void validateKey(String key) {
         if (key == null || key.length() < 1 || key.length() > 128
                 || key.chars().anyMatch(c -> c < 33 || c > 126)) {
-            throw new IllegalArgumentException("Idempotency key must contain 1..128 visible ASCII characters");
+            throw new InvalidOrderRequestException("Idempotency key must contain 1..128 visible ASCII characters");
+        }
+    }
+
+    /** Only local domain operations belong here; port and transaction failures must propagate unchanged. */
+    private static <T> T domainCommand(Supplier<T> operation) {
+        try {
+            return operation.get();
+        } catch (IllegalArgumentException ex) {
+            throw new InvalidOrderRequestException(ex.getMessage(), ex);
+        } catch (IllegalStateException ex) {
+            throw new OrderConflictException(ex.getMessage(), ex);
         }
     }
 }

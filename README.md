@@ -200,3 +200,8 @@ There is no authentication, account authorisation, broker/FIX connectivity,
 Kafka, Redis, risk engine, execution simulator, settlement or performance
 benchmark. The local database is not a production credential/role model. Keep
 the unauthenticated demo API local. See [follow-up work](docs/phase1-roadmap.md).
+
+## License
+
+Project code is available under the [MIT License](LICENSE). The generated Maven
+Wrapper retains its Apache 2.0 notices; dependencies retain their own licenses.

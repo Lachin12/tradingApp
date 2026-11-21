@@ -16,8 +16,10 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import io.github.lachin12.oms.application.ConcurrentOrderUpdateException;
 import io.github.lachin12.oms.application.IdempotencyConflictException;
+import io.github.lachin12.oms.application.InvalidOrderRequestException;
 import io.github.lachin12.oms.application.NotFoundException;
 import io.github.lachin12.oms.application.OmsService;
+import io.github.lachin12.oms.application.OrderConflictException;
 import io.github.lachin12.oms.application.StoredOrder;
 import io.github.lachin12.oms.application.SubmissionResult;
 import io.github.lachin12.oms.domain.Account;
@@ -30,8 +32,11 @@ import java.time.Instant;
 import java.util.Currency;
 import java.util.List;
 import java.util.UUID;
+import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
@@ -250,11 +255,23 @@ class OrderControllerTest {
 
     @Test
     void terminalStateCancellationReturns409() throws Exception {
-        given(service.cancel(ORDER_ID, 0, "request")).willThrow(new IllegalStateException("Illegal order transition"));
+        given(service.cancel(ORDER_ID, 0, "request")).willThrow(new OrderConflictException("Illegal order transition"));
         mvc.perform(post("/api/v1/orders/{id}/cancel", ORDER_ID).contentType(MediaType.APPLICATION_JSON)
                         .content("{\"expectedVersion\":0,\"reason\":\"request\"}"))
                 .andExpect(status().isConflict())
-                .andExpect(jsonPath("$.code").value("illegal-state"));
+                .andExpect(jsonPath("$.code").value("illegal-state"))
+                .andExpect(jsonPath("$.detail").value("Illegal order transition"));
+    }
+
+    @Test
+    void typedRequestValidationFailureReturns400() throws Exception {
+        given(service.submit(any(), eq("key-1")))
+                .willThrow(new InvalidOrderRequestException("Quantity must respect instrument step"));
+        mvc.perform(post("/api/v1/orders").header("Idempotency-Key", "key-1")
+                        .contentType(MediaType.APPLICATION_JSON).content(BODY))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("invalid-request"))
+                .andExpect(jsonPath("$.detail").value("Quantity must respect instrument step"));
     }
 
     @Test
@@ -279,6 +296,36 @@ class OrderControllerTest {
                 .andExpect(content().string(not(containsString("password"))))
                 .andExpect(content().string(not(containsString("SQL"))))
                 .andExpect(jsonPath("$.trace").doesNotExist());
+    }
+
+    @ParameterizedTest
+    @MethodSource("unexpectedAdapterFailures")
+    void unexpectedArgumentOrStateFailureReturnsSanitized500(boolean listing, RuntimeException failure) throws Exception {
+        String path;
+        if (listing) {
+            given(service.list(ACCOUNT_ID, 50, 0)).willThrow(failure);
+            path = "/api/v1/orders?accountId=" + ACCOUNT_ID;
+        } else {
+            given(service.get(ORDER_ID)).willThrow(failure);
+            path = "/api/v1/orders/" + ORDER_ID;
+        }
+
+        mvc.perform(get(path))
+                .andExpect(status().isInternalServerError())
+                .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON))
+                .andExpect(jsonPath("$.code").value("internal-error"))
+                .andExpect(jsonPath("$.type").value("urn:trading-oms:error:internal-error"))
+                .andExpect(jsonPath("$.detail").value("The request could not be completed."))
+                .andExpect(content().string(not(containsString("password"))))
+                .andExpect(content().string(not(containsString("SQL"))))
+                .andExpect(content().string(not(containsString("schema"))))
+                .andExpect(jsonPath("$.trace").doesNotExist());
+    }
+
+    private static Stream<Arguments> unexpectedAdapterFailures() {
+        return Stream.of(false, true).flatMap(listing -> Stream.of(
+                Arguments.of(listing, new IllegalArgumentException("SQL password=secret schema=private_orders")),
+                Arguments.of(listing, new IllegalStateException("SQL password=secret schema=private_orders"))));
     }
 
     @Test
