@@ -364,7 +364,7 @@ class JdbcOmsStoreIT {
         Execution report = new Execution(uuid(600), decimal("1"), decimal("100"), MICROS);
         service.recordExecution(first.order().id(), 0, report);
 
-        assertThrows(DataAccessException.class,
+        assertThrows(ExecutionConflictException.class,
                 () -> service.recordExecution(second.order().id(), 0, report));
         StoredOrder unchanged = service.get(second.order().id());
         assertEquals(0, unchanged.version());
@@ -501,7 +501,7 @@ class JdbcOmsStoreIT {
     }
 
     private OmsService newService(OrderStore orderStore, SubmissionStore submissionStore) {
-        return new OmsService(store, orderStore, submissionStore, transactions,
+        return new OmsService(store, orderStore, submissionStore, store, transactions,
                 Clock.fixed(NOW, ZoneOffset.UTC), JdbcOmsStoreIT::nextId);
     }
 

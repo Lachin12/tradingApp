@@ -25,6 +25,7 @@ services:
       SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/${OMS_DB_NAME:-oms}
       SPRING_DATASOURCE_USERNAME: ${OMS_DB_USER:-oms}
       SPRING_DATASOURCE_PASSWORD: ${OMS_DB_PASSWORD:?Copy .env.example to .env and set a local database password}
+      OMS_SIMULATION_ENABLED: ${OMS_SIMULATION_ENABLED:-false}
     ports:
       - "127.0.0.1:8080:8080"
     depends_on:

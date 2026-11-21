@@ -44,6 +44,13 @@ class OmsHttpIT {
     @Autowired OmsService service;
 
     @Test
+    void simulationRouteIsAbsentByDefault() {
+        assertThat(http.postForEntity("/api/v1/simulation/orders/00000000-0000-0000-0000-000000000099/steps",
+                Map.of(), JsonNode.class).getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
+        assertThat(http.getForObject("/v3/api-docs", String.class)).doesNotContain("/api/v1/simulation/");
+    }
+
+    @Test
     void submissionRetryRetrievalCancellationAndDocumentationWorkAgainstPostgres() {
         ResponseEntity<JsonNode> created = submit("http-flow", market("10"));
         assertThat(created.getStatusCode()).isEqualTo(HttpStatus.CREATED);

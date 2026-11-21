@@ -13,7 +13,10 @@ needs relevant tests; [verification](verification.md) records observed runs.
 | 5 — API/operations | DTOs, stable errors, OpenAPI, application/PostgreSQL Compose services, non-root runtime image, health endpoint and examples. |
 
 Phase 1 accepts valid orders locally. MARKET requests never imply fills. There
-is no public execution-simulation route. Cancellation requires expected version
+is no generic public broker-execution route. A later opt-in
+[manual simulator](execution-simulation.md) now supplies explicit execution
+steps through the durable idempotent execution boundary; it remains disabled
+by default. Cancellation requires expected version
 and conflicts on stale writes; callers reload and revalidate before retrying.
 
 ## Follow-up work
@@ -25,9 +28,10 @@ and conflicts on stale writes; callers reload and revalidate before retrying.
    observability and recovery controls remain follow-up work. There is no
    default publisher or external delivery guarantee. Add Kafka only alongside
    explicit failure semantics and tests.
-2. **Risk/execution adapters.** Add concrete risk decisions before acceptance
-   and deterministic simulation through the internal execution boundary.
-   Preserve duplicate-execution handling. Real venue/FIX connectivity would
+2. **Risk and real execution policies.** Durable execution receipts and the
+   optional deterministic simulator are implemented; see
+   [ADR 0005](adr/0005-execution-simulation.md). Concrete risk decisions before
+   acceptance remain future work. Real venue/FIX connectivity would
    require cancel acknowledgements, late-fill reconciliation and session
    recovery, beyond this simulation.
 3. **Access/operational hardening.** Authentication, account authorisation,

@@ -10,7 +10,8 @@ Phase 1 implements submission, retrieval, bounded listing, cancellation and
 lifecycle history through REST; PostgreSQL persistence with Flyway; a durable
 outbox; and JUnit 5, Mockito and Testcontainers tests. See
 [Phase 1 verification](docs/verification.md) and
-[outbox verification](docs/outbox-verification.md) for checks actually executed and environment
+[outbox verification](docs/outbox-verification.md) and
+[simulation verification](docs/simulation-verification.md) for checks actually executed and environment
 limitations. No production-readiness, trading-latency or external-delivery claim
 is made.
 
@@ -104,7 +105,34 @@ Cancellation requires the latest version. A stale version returns `409`; reload
 and revalidate intent before retrying. Illegal lifecycle operations also return
 conflicts. Missing resources return `404`, invalid input `400`. Listing requires
 an account ID and bounds `limit` to 1–100 and `offset` to 0–10000. There is no
-public fill route: a future execution adapter can call the internal use case.
+generic fill route. An [opt-in local simulator](docs/execution-simulation.md)
+can submit explicit steps through the normal execution use case.
+
+## Optional execution simulation
+
+Simulation is disabled by default. With a local `.env` configured, enable the
+manual route and run the two-step demo (requires Bash, `curl` and `jq`):
+
+```sh
+OMS_SIMULATION_ENABLED=true docker compose up --build -d
+./scripts/demo-simulation.sh
+```
+
+Build the JAR first as described above and wait for health `UP`. The script
+submits a MARKET order for `10`, explicitly fills `4` then `6` at `100.25`, and
+replays the first step after completion. Fixed scenario identity and source
+timestamps make reruns reuse the same durable execution receipts. It does not
+enable simulation or invent market prices. The route is absent when disabled.
+
+`POST /api/v1/simulation/orders/{orderId}/steps` accepts scenario ID, step,
+expected version, quantity, price and explicit source time. Execution receipt,
+order, lifecycle event and outbox commit together. An exact retry returns the
+current snapshot even with its original stale expected version; changed terms
+under the same execution ID return 409. New executions retain the normal
+version, lifecycle, tick/step and limit rules. See the
+[simulation guide](docs/execution-simulation.md) and
+[ADR 0005](docs/adr/0005-execution-simulation.md) for inputs, retry behaviour and
+limits. No scheduler, matching engine or real venue is involved.
 
 ## Architecture and transaction decisions
 
@@ -165,7 +193,9 @@ independently from the requested projects.
 | FILLED, CANCELLED, REJECTED | None |
 
 Only an execution changes filled quantity. Orders cannot execute before
-acceptance, overfill, reuse execution IDs, or execute worse than a LIMIT price.
+acceptance, overfill, append duplicate execution IDs, or execute worse than a
+LIMIT price. The application recognizes exact execution-report retries before
+issuing another fill command.
 Invalid terms fail before creating an order. `REJECTED` represents a decision on
 an existing `NEW` order for a future risk module; valid submissions are accepted
 directly by the current use case.
@@ -199,8 +229,9 @@ controlled cancellation/fill races. HTTP tests cover the public contract. See
 [verification](docs/verification.md) for observed runs; existence is not evidence
 of a passing test.
 
-Cancellation is final in this simulation; later fills fail. Real connectivity
-requires cancel-request/acknowledgement, late-fill reconciliation and recovery.
+Cancellation is final in this simulation; new later fills fail. Exact replay
+of an earlier committed execution returns current state without another fill.
+Real connectivity requires cancel-request/acknowledgement, late-fill reconciliation and recovery.
 `remainingQuantity` means requested minus filled, including unexecuted quantity
 on a cancelled order.
 
@@ -209,8 +240,9 @@ This small implementation needs further work for unbounded execution journals.
 Bounded offset pagination is not a consistent snapshot across HTTP requests.
 
 There is no authentication, account authorisation, broker/FIX connectivity,
-Kafka, Redis, risk engine, execution simulator, settlement or performance
-benchmark. The local database is not a production credential/role model. Keep
+Kafka, Redis, risk engine, settlement or performance benchmark. The explicit
+local execution simulator is optional and disabled by default. The local database
+is not a production credential/role model. Keep
 the unauthenticated demo API local. See [follow-up work](docs/phase1-roadmap.md).
 
 ## License
