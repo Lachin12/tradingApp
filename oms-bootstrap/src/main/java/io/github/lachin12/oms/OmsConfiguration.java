@@ -2,6 +2,7 @@ package io.github.lachin12.oms;
 
 import io.github.lachin12.oms.application.OmsService;
 import io.github.lachin12.oms.infrastructure.JdbcOmsStore;
+import io.github.lachin12.oms.infrastructure.JdbcOutboxStore;
 import io.github.lachin12.oms.infrastructure.SpringUnitOfWork;
 import java.time.Clock;
 import java.util.UUID;
@@ -19,6 +20,9 @@ public class OmsConfiguration {
 
     @Bean
     JdbcOmsStore orderStore(JdbcTemplate jdbc) { return new JdbcOmsStore(jdbc); }
+
+    @Bean
+    JdbcOutboxStore outboxStore(JdbcTemplate jdbc) { return new JdbcOutboxStore(jdbc); }
 
     @Bean
     SpringUnitOfWork unitOfWork(PlatformTransactionManager manager) { return new SpringUnitOfWork(manager); }

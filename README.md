@@ -9,7 +9,8 @@ connectivity. Acceptance is separate from execution: a MARKET order stays
 Phase 1 implements submission, retrieval, bounded listing, cancellation and
 lifecycle history through REST; PostgreSQL persistence with Flyway; a durable
 outbox; and JUnit 5, Mockito and Testcontainers tests. See
-[verification](docs/verification.md) for checks actually executed and environment
+[Phase 1 verification](docs/verification.md) and
+[outbox verification](docs/outbox-verification.md) for checks actually executed and environment
 limitations. No production-readiness, trading-latency or external-delivery claim
 is made.
 
@@ -131,9 +132,20 @@ execution against one version cannot both commit. The loser receives a conflict
 and is not automatically retried. Previously committed fills stay in the history.
 
 Lifecycle history is append-only. The outbox stores durable pending records with
-stable event IDs and per-order sequences; **no publisher or delivery worker is
-implemented**. Persisting rows does not establish external delivery or
-cross-system exactly-once effects.
+stable event IDs and per-order sequences. A leased dispatch component claims
+eligible events, retries failures and fences acknowledgements. **No transport,
+scheduled worker or default publisher is installed.** Persisting or claiming
+rows does not establish external delivery or cross-system exactly-once effects.
+
+`JdbcOutboxStore` is available from the application context. An explicit caller
+can construct `OutboxDispatcher` with that store, the transaction adapter, a
+supplied `EventPublisher`, an ID supplier, lease/retry settings and the
+transaction context. `dispatch(1..100)` claims one event at a time and publishes
+outside database transactions. Do not invoke it inside an ambient transaction.
+The publisher must enforce its own bounded timeout; none is supplied here.
+See [the delivery contract](docs/outbox-delivery.md) and
+[ADR 0004](docs/adr/0004-outbox-dispatch.md) for lease recovery, duplicate
+publication and ordering limits.
 
 See [modular monolith](docs/adr/0001-modular-monolith.md),
 [lifecycle and decimals](docs/adr/0002-order-lifecycle-and-decimals.md) and

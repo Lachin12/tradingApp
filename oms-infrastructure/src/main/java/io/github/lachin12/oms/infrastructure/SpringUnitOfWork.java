@@ -1,14 +1,16 @@
 package io.github.lachin12.oms.infrastructure;
 
 import io.github.lachin12.oms.application.UnitOfWork;
+import io.github.lachin12.oms.application.outbox.TransactionContext;
 import java.util.Objects;
 import java.util.function.Supplier;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.support.TransactionTemplate;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 /** Each use case owns one READ COMMITTED transaction, including its durable events. */
-public final class SpringUnitOfWork implements UnitOfWork {
+public final class SpringUnitOfWork implements UnitOfWork, TransactionContext {
     private final TransactionTemplate transaction;
 
     public SpringUnitOfWork(PlatformTransactionManager manager) {
@@ -24,5 +26,10 @@ public final class SpringUnitOfWork implements UnitOfWork {
     public <T> T execute(Supplier<T> work) {
         Objects.requireNonNull(work, "work");
         return transaction.execute(status -> work.get());
+    }
+
+    @Override
+    public boolean active() {
+        return TransactionSynchronizationManager.isActualTransactionActive();
     }
 }
