@@ -66,6 +66,36 @@ public final class Order {
         return append(OrderEventType.ACCEPTED, OrderStatus.ACCEPTED, filledQuantity, null, null, at);
     }
 
+    /** Rebuilds a persisted aggregate through the same invariants as live commands. */
+    public static Order rehydrate(UUID id, Account account, Instrument instrument, Side side,
+                                  OrderType type, BigDecimal quantity, BigDecimal limitPrice,
+                                  List<OrderEvent> history) {
+        DecimalRules.required(history, "history");
+        if (history.isEmpty()) {
+            throw new IllegalArgumentException("Order history is required");
+        }
+        List<OrderEvent> facts = List.copyOf(history);
+        Order restored = submit(id, account, instrument, side, type, quantity, limitPrice,
+                facts.getFirst().occurredAt());
+        if (!restored.events.getFirst().equals(facts.getFirst())) {
+            throw new IllegalArgumentException("Invalid submission history");
+        }
+        for (int i = 1; i < facts.size(); i++) {
+            OrderEvent fact = facts.get(i);
+            restored = switch (fact.type()) {
+                case ACCEPTED -> restored.accept(fact.occurredAt());
+                case REJECTED -> restored.reject(fact.reason(), fact.occurredAt());
+                case CANCELLED -> restored.cancel(fact.reason(), fact.occurredAt());
+                case EXECUTED -> restored.fill(fact.execution(), fact.occurredAt());
+                case SUBMITTED -> throw new IllegalArgumentException("Repeated submission event");
+            };
+            if (!restored.events.getLast().equals(fact)) {
+                throw new IllegalArgumentException("Inconsistent order history");
+            }
+        }
+        return restored;
+    }
+
     public Order reject(String reason, Instant at) {
         return append(OrderEventType.REJECTED, OrderStatus.REJECTED, filledQuantity, null, reason, at);
     }

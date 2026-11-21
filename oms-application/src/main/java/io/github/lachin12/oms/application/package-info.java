@@ -1,2 +1,2 @@
-/** Application use cases and ports will live here; domain dependency points inward. */
+/** Framework-free application use cases and ports; dependencies point toward the domain. */
 package io.github.lachin12.oms.application;
