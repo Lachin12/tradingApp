@@ -535,7 +535,7 @@ class JdbcOutboxStoreIT {
     }
 
     private static OmsService newService(JdbcOmsStore target, SpringUnitOfWork unitOfWork) {
-        return new OmsService(target, target, target, unitOfWork, Clock.fixed(NOW, ZoneOffset.UTC),
+        return new OmsService(target, target, target, target, unitOfWork, Clock.fixed(NOW, ZoneOffset.UTC),
                 () -> uuid(IDS.getAndIncrement()));
     }
 

@@ -1,6 +1,8 @@
 package io.github.lachin12.oms.infrastructure;
 
 import io.github.lachin12.oms.application.ConcurrentOrderUpdateException;
+import io.github.lachin12.oms.application.ExecutionClaim;
+import io.github.lachin12.oms.application.ExecutionStore;
 import io.github.lachin12.oms.application.OrderStore;
 import io.github.lachin12.oms.application.ReferenceData;
 import io.github.lachin12.oms.application.StoredOrder;
@@ -31,7 +33,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 /** PostgreSQL adapter; snapshots, history and outbox references share the caller's transaction. */
-public final class JdbcOmsStore implements OrderStore, SubmissionStore, ReferenceData {
+public final class JdbcOmsStore implements OrderStore, SubmissionStore, ReferenceData, ExecutionStore {
     private static final String SELECT_EVENTS = """
             SELECT o.*, e.sequence AS event_sequence, e.event_type, e.previous_status,
                    e.status AS event_status, e.occurred_at, e.cumulative_quantity,
@@ -74,6 +76,28 @@ public final class JdbcOmsStore implements OrderStore, SubmissionStore, Referenc
                 WHERE account_id = ? AND idempotency_key = ?
                 """, (rs, row) -> new SubmissionClaim(rs.getObject("order_id", UUID.class),
                         rs.getString("fingerprint"), inserted == 1), accountId, key);
+    }
+
+    @Override
+    public ExecutionClaim claimExecution(UUID orderId, Execution execution) {
+        requireTransaction();
+        Objects.requireNonNull(orderId, "order id");
+        Objects.requireNonNull(execution, "execution");
+        int inserted = jdbc.update("""
+                INSERT INTO execution_receipts(execution_id, order_id, quantity, price, executed_at)
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT (execution_id) DO NOTHING
+                """, execution.id(), orderId, execution.quantity(), execution.price(),
+                timestamp(execution.executedAt()));
+        // Like submission claims, a losing INSERT can wait for a row invisible to
+        // its original statement snapshot. Read the committed winner in a new statement.
+        return jdbc.queryForObject("""
+                SELECT execution_id, order_id, quantity, price, executed_at
+                FROM execution_receipts WHERE execution_id = ?
+                """, (rs, row) -> new ExecutionClaim(rs.getObject("order_id", UUID.class),
+                        new Execution(rs.getObject("execution_id", UUID.class), rs.getBigDecimal("quantity"),
+                                rs.getBigDecimal("price"), instant(rs, "executed_at")), inserted == 1),
+                execution.id());
     }
 
     @Override

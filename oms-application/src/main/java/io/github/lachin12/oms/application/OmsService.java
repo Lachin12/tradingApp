@@ -14,15 +14,17 @@ public final class OmsService {
     private final ReferenceData references;
     private final OrderStore orders;
     private final SubmissionStore submissions;
+    private final ExecutionStore executions;
     private final UnitOfWork transactions;
     private final Clock clock;
     private final Supplier<UUID> ids;
 
     public OmsService(ReferenceData references, OrderStore orders, SubmissionStore submissions,
-                      UnitOfWork transactions, Clock clock, Supplier<UUID> ids) {
+                      ExecutionStore executions, UnitOfWork transactions, Clock clock, Supplier<UUID> ids) {
         this.references = Objects.requireNonNull(references);
         this.orders = Objects.requireNonNull(orders);
         this.submissions = Objects.requireNonNull(submissions);
+        this.executions = Objects.requireNonNull(executions);
         this.transactions = Objects.requireNonNull(transactions);
         this.clock = Objects.requireNonNull(clock);
         this.ids = Objects.requireNonNull(ids);
@@ -71,18 +73,39 @@ public final class OmsService {
         });
     }
 
-    /** Future execution adapters use this boundary. There is deliberately no public fill REST route. */
+    /** Execution adapters share the idempotent report boundary; no public generic fill route exists. */
     public StoredOrder recordExecution(UUID orderId, long expectedVersion, Execution execution) {
+        return reportExecution(orderId, expectedVersion, execution).storedOrder();
+    }
+
+    public ExecutionResult reportExecution(UUID orderId, long expectedVersion, Execution execution) {
         requireId(orderId);
         requireVersion(expectedVersion);
         if (execution == null) throw new InvalidOrderRequestException("Execution is required");
         Execution normalized = domainCommand(() -> new Execution(execution.id(), execution.quantity(), execution.price(),
-                execution.executedAt().truncatedTo(ChronoUnit.MICROS)));
+                ExecutionTimestamps.normalize(execution.executedAt())));
         return transactions.execute(() -> {
-            StoredOrder stored = requireVersion(requireOrder(orderId), expectedVersion);
+            ExecutionClaim claim = executions.claimExecution(orderId, normalized);
+            if (!claim.orderId().equals(orderId) || !claim.execution().equals(normalized)) {
+                throw new ExecutionConflictException();
+            }
+            StoredOrder stored = requireOrder(orderId);
+            Execution previous = stored.order().events().stream().map(OrderEvent::execution)
+                    .filter(Objects::nonNull).filter(report -> report.id().equals(normalized.id()))
+                    .findFirst().orElse(null);
+            if (previous != null) {
+                if (!previous.equals(normalized)) throw new ExecutionConflictException();
+                // Identity and full report match. Replays precede version/lifecycle checks,
+                // including after a later fill or cancellation, and never append another fact.
+                return new ExecutionResult(stored, true);
+            }
+            if (!claim.owner()) {
+                throw new IllegalStateException("Committed execution receipt has no corresponding lifecycle event");
+            }
+            requireVersion(stored, expectedVersion);
             Instant at = atLeastLastEvent(stored.order());
             Order filled = domainCommand(() -> stored.order().fill(normalized, at));
-            return orders.update(filled, expectedVersion);
+            return new ExecutionResult(orders.update(filled, expectedVersion), false);
         });
     }
 

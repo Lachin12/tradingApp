@@ -50,6 +50,7 @@ class OmsServiceTest {
     @Mock private ReferenceData references;
     @Mock private OrderStore orders;
     @Mock private SubmissionStore submissions;
+    @Mock private ExecutionStore executions;
     private final RecordingUnitOfWork transactions = new RecordingUnitOfWork();
     private final MutableClock clock = new MutableClock(NOW);
     private final AtomicInteger generatedIds = new AtomicInteger();
@@ -57,7 +58,7 @@ class OmsServiceTest {
 
     @BeforeEach
     void createService() {
-        service = new OmsService(references, orders, submissions, transactions, clock, () -> {
+        service = new OmsService(references, orders, submissions, executions, transactions, clock, () -> {
             generatedIds.incrementAndGet();
             return ORDER_ID;
         });
@@ -275,6 +276,7 @@ class OmsServiceTest {
         when(orders.find(ORDER_ID)).thenReturn(Optional.of(new StoredOrder(acceptedOrder(), 0)));
         when(orders.update(any(), eq(0L))).thenAnswer(call -> new StoredOrder(call.getArgument(0), 1));
         Execution report = new Execution(EXECUTION_ID, decimal("1"), decimal("99.99"), NOW);
+        claimExecutionOwner();
 
         StoredOrder result = service.recordExecution(ORDER_ID, 0, report);
 
@@ -288,6 +290,7 @@ class OmsServiceTest {
     void staleExecutionDoesNotPersist() {
         when(orders.find(ORDER_ID)).thenReturn(Optional.of(new StoredOrder(acceptedOrder(), 1)));
         Execution report = new Execution(EXECUTION_ID, decimal("1"), decimal("99.99"), CANONICAL_NOW);
+        claimExecutionOwner();
 
         assertThrows(ConcurrentOrderUpdateException.class, () -> service.recordExecution(ORDER_ID, 0, report));
         verify(orders, never()).update(any(), anyLong());
@@ -356,6 +359,7 @@ class OmsServiceTest {
         Order cancelled = acceptedOrder().cancel("User request", CANONICAL_NOW);
         when(orders.find(ORDER_ID)).thenReturn(Optional.of(new StoredOrder(cancelled, 1)));
         Execution report = new Execution(EXECUTION_ID, decimal("1"), decimal("100"), CANONICAL_NOW);
+        claimExecutionOwner();
 
         assertThrows(OrderConflictException.class, () -> service.recordExecution(ORDER_ID, 1, report));
         verify(orders, never()).update(any(), anyLong());
@@ -415,7 +419,7 @@ class OmsServiceTest {
         UnitOfWork failingTransactions = new UnitOfWork() {
             @Override public <T> T execute(Supplier<T> work) { throw failure; }
         };
-        OmsService failingService = new OmsService(references, orders, submissions, failingTransactions,
+        OmsService failingService = new OmsService(references, orders, submissions, executions, failingTransactions,
                 clock, () -> ORDER_ID);
 
         assertSame(failure, assertThrows(RuntimeException.class, () -> failingService.submit(marketRequest(), "key")));
@@ -428,7 +432,7 @@ class OmsServiceTest {
         IllegalStateException internal = new IllegalStateException("Internal clock configuration");
         when(failingClock.instant()).thenThrow(internal);
         when(orders.find(ORDER_ID)).thenReturn(Optional.of(new StoredOrder(acceptedOrder(), 0)));
-        OmsService failingService = new OmsService(references, orders, submissions, transactions,
+        OmsService failingService = new OmsService(references, orders, submissions, executions, transactions,
                 failingClock, () -> ORDER_ID);
 
         assertSame(internal, assertThrows(IllegalStateException.class,
@@ -439,6 +443,11 @@ class OmsServiceTest {
     static Stream<RuntimeException> internalFailures() {
         return Stream.of(new IllegalArgumentException("Internal database argument"),
                 new IllegalStateException("Internal database state"));
+    }
+
+    private void claimExecutionOwner() {
+        when(executions.claimExecution(eq(ORDER_ID), any(Execution.class))).thenAnswer(call ->
+                new ExecutionClaim(call.getArgument(0), call.getArgument(1), true));
     }
 
     private void claimOwner(SubmitOrder request) {
